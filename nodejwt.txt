@@ -1,0 +1,136 @@
+const mongoose=require('mongoose')
+require('dotenv').config()
+const mongo_url=process.env.mongo_url
+mongoose.connect(mongo_url)
+const db = mongoose.connection
+
+db.on('connected',()=>{
+    console.log('db connected..');
+    
+})
+db.on('error',(err)=>{
+    console.log(err);
+    
+})
+
+module.exports=db;
+
+
+const express = require('express')
+const app = express()
+const db=require('./db')
+require('dotenv').config();
+const user_route=require('./route/userRoute')
+app.use('/user',user_route)
+
+const port = process.env.port || 3000
+app.listen(port,()=>{
+    console.log(`server is running at ${port}`);
+    
+})
+
+const jwt =require('jsonwebtoken')
+
+const jwtAuthMiddleware = (req,res,next) =>{
+    const authorization = req.headers.authorization;
+    if(!authorization) return res.status(401).json({error:'token not found'})
+    
+    const token = authorization.split(' ')[1];
+    if(!token) return res.status(401).json({ error: 'Unauthorized' });
+
+    try {
+        const decoded = jwt.verify(token,process.env.JWT_SECRET)
+        req.userPayLoad = decoded
+        next()
+    } catch (error) {
+        console.error(err);
+        res.status(401).json({ error: 'Invalid token' });
+    }
+}
+
+const genertaeToken = (userData) =>{
+    return jwt.sign(userData,process.env.JWT_SECRET)
+}
+
+module.exports={
+    jwtAuthMiddleware,
+    genertaeToken
+}
+
+const User = require('../model/userModel')
+const { jwtAuthMiddleware,genertaeToken} =require('../jwt')
+
+const saveUser =async (req,res)=>{
+    try {
+        const data =req.body
+        const newUser=new User(data)
+        const response = await newUser.save()
+        console.log(response);
+        const payload={
+            id:response.id,
+            name:response.name
+        }
+        console.log(payload);
+        const token = genertaeToken(payload)
+        console.log('token is: ',token);
+        
+        res.status(200).json({response:response,token:token})
+        
+
+    } catch (error) {
+        console.log(error.message);
+        res.status(400).json({message:"internal server error"})
+        
+    }
+}
+
+const loginUser=async(req,res)=>{
+    try {
+        const {name,password} =req.body;
+        const user= await User.findOne({name})
+        if(!user)
+            return res.status(401).json({error:'invalid name'})
+        const payload={
+            id:user.id,
+            name:user.name
+        }
+        const token = genertaeToken(payload)
+        res.status(200).json({token:token})
+    } catch (error) {
+        res.status(500).json({ error: 'Internal server error.' });
+    }
+}
+
+const updateUser = async(req,res)=>{
+    try {
+        const userId=req.params.userId
+        const updateUserData=req.body
+        const response = await User.findByIdAndUpdate(userId,updateUserData)
+        console.log('data updated');
+        res.status(200).json({response:response})
+        
+    } catch (error) {
+        console.log(error.message);
+        res.status(400).json({message:"internal server error"})
+    }
+}
+
+module.exports={
+    saveUser,
+    loginUser,
+    updateUser
+}
+
+
+const express = require('express')
+const user_route=express.Router()
+const body_parser = require('body-parser')
+user_route.use(body_parser.json())
+const user_controller = require('../controller/userController')
+const { jwtAuthMiddleware,genertaeToken} =require('../jwt')
+
+user_route.post('/save',user_controller.saveUser)
+user_route.post('/login',user_controller.loginUser)
+user_route.put('/:userId',jwtAuthMiddleware,user_controller.updateUser)
+
+module.exports=user_route
